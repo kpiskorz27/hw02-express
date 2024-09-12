@@ -1,13 +1,28 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
+const gravatar = require("gravatar");
+const multer = require("multer");
+const Jimp = require("jimp");
+const fs = require("fs");
+const path = require("path");
 const User = require("../../models/user");
+const auth = require("../../middleware/auth");
 
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
 
-// Register a new user
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "tmp/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, file.originalname);
+  },
+});
+const upload = multer({ storage });
+
 router.post(
   "/signup",
   [
@@ -30,13 +45,20 @@ router.post(
         return res.status(409).json({ message: "Email in use" });
       }
 
-      user = new User({ email, password });
+      const avatarURL = gravatar.url(email, {
+        s: "250",
+        r: "pg",
+        d: "identicon",
+      });
+
+      user = new User({ email, password, avatarURL });
       await user.save();
 
       return res.status(201).json({
         user: {
           email: user.email,
           subscription: user.subscription,
+          avatarURL: user.avatarURL,
         },
       });
     } catch (error) {
@@ -45,7 +67,6 @@ router.post(
   }
 );
 
-// Login a user
 router.post(
   "/login",
   [
@@ -80,6 +101,7 @@ router.post(
         user: {
           email: user.email,
           subscription: user.subscription,
+          avatarURL: user.avatarURL,
         },
       });
     } catch (error) {
@@ -88,49 +110,54 @@ router.post(
   }
 );
 
-// Logout a user
-router.get("/logout", async (req, res) => {
-  const token = req.header("Authorization")?.replace("Bearer ", "");
-  if (!token) {
-    return res.status(401).json({ message: "Not authorized" });
-  }
-
+router.get("/logout", auth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    if (!user) {
-      return res.status(401).json({ message: "Not authorized" });
-    }
-
-    user.token = null;
-    await user.save();
-
+    req.user.token = null;
+    await req.user.save();
     return res.status(204).send();
   } catch (error) {
-    return res.status(401).json({ message: "Not authorized" });
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
-// Get current user
-router.get("/current", async (req, res) => {
-  const token = req.header("Authorization")?.replace("Bearer ", "");
-  if (!token) {
-    return res.status(401).json({ message: "Not authorized" });
+router.get("/current", auth, (req, res) => {
+  res.json({
+    email: req.user.email,
+    subscription: req.user.subscription,
+    avatarURL: req.user.avatarURL,
+  });
+});
+
+router.post("/avatars", auth, upload.single("avatar"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded" });
   }
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    if (!user || user.token !== token) {
-      return res.status(401).json({ message: "Not authorized" });
-    }
+  const { path: tempPath, originalname } = req.file;
 
-    return res.status(200).json({
-      email: user.email,
-      subscription: user.subscription,
-    });
+  const uniqueFilename = `${req.user._id}-${Date.now()}-${originalname}`;
+  const uploadPath = path.join(
+    __dirname,
+    "../../public/avatars",
+    uniqueFilename
+  );
+
+  try {
+    const image = await Jimp.read(tempPath);
+    await image.resize(250, 250).writeAsync(uploadPath);
+
+    const avatarURL = `/avatars/${uniqueFilename}`;
+    req.user.avatarURL = avatarURL;
+    await req.user.save();
+
+    fs.unlinkSync(tempPath);
+
+    res.json({ avatarURL });
   } catch (error) {
-    return res.status(401).json({ message: "Not authorized" });
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+    res.status(500).json({ message: "Failed to process image" });
   }
 });
 
