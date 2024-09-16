@@ -6,7 +6,7 @@ const sgMail = require("@sendgrid/mail");
 const User = require("../../models/user");
 const { v4: uuidv4 } = require("uuid");
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set SendGrid API key
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
@@ -39,7 +39,7 @@ router.post(
         r: "pg",
         d: "identicon",
       });
-      const verificationToken = uuidv4(); // Generate a unique verification token
+      const verificationToken = uuidv4();
 
       user = new User({ email, password, avatarURL, verificationToken });
       await user.save();
