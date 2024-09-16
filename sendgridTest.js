@@ -3,9 +3,12 @@ const sgMail = require("@sendgrid/mail");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
+// Disable sandbox mode (set it to false)
+sgMail.setSandboxMode(false);
+
 const msg = {
   to: "kuba.piskorz@gmail.com",
-  from: "kuba.piskorz@gmail.com",
+  from: process.env.SENDGRID_SENDER_EMAIL,
   subject: "Test email from SendGrid",
   text: "This is a test email sent from SendGrid!",
   html: "<strong>This is a test email sent from SendGrid!</strong>",

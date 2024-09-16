@@ -41,6 +41,8 @@ router.post(
       });
       const verificationToken = uuidv4();
 
+      console.log(`Generated verificationToken: ${verificationToken}`);
+
       user = new User({ email, password, avatarURL, verificationToken });
       await user.save();
 
@@ -74,18 +76,23 @@ router.post(
 router.get("/verify/:verificationToken", async (req, res) => {
   try {
     const { verificationToken } = req.params;
+    console.log("Received verification request with token:", verificationToken);
+
     const user = await User.findOne({ verificationToken });
 
     if (!user) {
+      console.log("No user found with verification token:", verificationToken);
       return res.status(404).json({ message: "User not found" });
     }
 
     user.verify = true;
-    user.verificationToken = null;
+    user.verificationToken = undefined;
     await user.save();
 
+    console.log("User successfully verified:", user.email);
     res.status(200).json({ message: "Verification successful" });
   } catch (error) {
+    console.error("Error during email verification:", error);
     res.status(500).json({ message: "Server error" });
   }
 });
