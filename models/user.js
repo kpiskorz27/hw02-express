@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const { v4: uuidv4 } = require("uuid");
 
 const userSchema = new mongoose.Schema({
   email: {
@@ -24,6 +25,15 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  verify: {
+    type: Boolean,
+    default: false,
+  },
+  verificationToken: {
+    type: String,
+    required: [true, "Verify token is required"],
+    default: () => uuidv4(),
+  },
 });
 
 userSchema.pre("save", async function (next) {
@@ -39,13 +49,6 @@ userSchema.pre("save", async function (next) {
 
 userSchema.methods.comparePassword = function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
-};
-
-userSchema.methods.generateAuthToken = function (jwt, secret) {
-  const payload = { id: this._id, email: this.email };
-  const token = jwt.sign(payload, secret, { expiresIn: "1h" });
-  this.token = token;
-  return token;
 };
 
 const User = mongoose.model("User", userSchema);

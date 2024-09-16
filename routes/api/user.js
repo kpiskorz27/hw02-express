@@ -2,27 +2,16 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
 const gravatar = require("gravatar");
-const multer = require("multer");
-const Jimp = require("jimp");
-const fs = require("fs");
-const path = require("path");
+const sgMail = require("@sendgrid/mail");
 const User = require("../../models/user");
-const auth = require("../../middleware/auth");
+const { v4: uuidv4 } = require("uuid");
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set SendGrid API key
 
 const router = express.Router();
-
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "tmp/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, file.originalname);
-  },
-});
-const upload = multer({ storage });
-
+// Signup route
 router.post(
   "/signup",
   [
@@ -50,23 +39,58 @@ router.post(
         r: "pg",
         d: "identicon",
       });
+      const verificationToken = uuidv4(); // Generate a unique verification token
 
-      user = new User({ email, password, avatarURL });
+      user = new User({ email, password, avatarURL, verificationToken });
       await user.save();
 
-      return res.status(201).json({
+      // Send verification email
+      const verificationLink = `${req.protocol}://${req.get(
+        "host"
+      )}/api/users/verify/${verificationToken}`;
+      const msg = {
+        to: email,
+        from: process.env.SENDGRID_SENDER_EMAIL,
+        subject: "Email Verification",
+        html: `<p>Please verify your email by clicking the following link: <a href="${verificationLink}">Verify Email</a></p>`,
+      };
+      await sgMail.send(msg);
+
+      res.status(201).json({
         user: {
           email: user.email,
           subscription: user.subscription,
           avatarURL: user.avatarURL,
         },
+        message: "Registration successful, verification email sent",
       });
     } catch (error) {
-      return res.status(500).json({ message: "Server error" });
+      res.status(500).json({ message: "Server error" });
     }
   }
 );
 
+// Email verification route
+router.get("/verify/:verificationToken", async (req, res) => {
+  try {
+    const { verificationToken } = req.params;
+    const user = await User.findOne({ verificationToken });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.verify = true;
+    user.verificationToken = null;
+    await user.save();
+
+    res.status(200).json({ message: "Verification successful" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Login route
 router.post(
   "/login",
   [
@@ -83,8 +107,10 @@ router.post(
 
     try {
       const user = await User.findOne({ email });
-      if (!user) {
-        return res.status(401).json({ message: "Email or password is wrong" });
+      if (!user || !user.verify) {
+        return res
+          .status(401)
+          .json({ message: "Email not verified or wrong credentials" });
       }
 
       const isMatch = await user.comparePassword(password);
@@ -105,59 +131,45 @@ router.post(
         },
       });
     } catch (error) {
-      return res.status(500).json({ message: "Server error" });
+      res.status(500).json({ message: "Server error" });
     }
   }
 );
 
-router.get("/logout", auth, async (req, res) => {
-  try {
-    req.user.token = null;
-    await req.user.save();
-    return res.status(204).send();
-  } catch (error) {
-    return res.status(500).json({ message: "Server error" });
-  }
-});
+// Resend verification email route
+router.post("/verify", async (req, res) => {
+  const { email } = req.body;
 
-router.get("/current", auth, (req, res) => {
-  res.json({
-    email: req.user.email,
-    subscription: req.user.subscription,
-    avatarURL: req.user.avatarURL,
-  });
-});
-
-router.post("/avatars", auth, upload.single("avatar"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ message: "No file uploaded" });
+  if (!email) {
+    return res.status(400).json({ message: "missing required field email" });
   }
 
-  const { path: tempPath, originalname } = req.file;
-
-  const uniqueFilename = `${req.user._id}-${Date.now()}-${originalname}`;
-  const uploadPath = path.join(
-    __dirname,
-    "../../public/avatars",
-    uniqueFilename
-  );
-
   try {
-    const image = await Jimp.read(tempPath);
-    await image.resize(250, 250).writeAsync(uploadPath);
-
-    const avatarURL = `/avatars/${uniqueFilename}`;
-    req.user.avatarURL = avatarURL;
-    await req.user.save();
-
-    fs.unlinkSync(tempPath);
-
-    res.json({ avatarURL });
-  } catch (error) {
-    if (fs.existsSync(tempPath)) {
-      fs.unlinkSync(tempPath);
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
-    res.status(500).json({ message: "Failed to process image" });
+
+    if (user.verify) {
+      return res
+        .status(400)
+        .json({ message: "Verification has already been passed" });
+    }
+
+    const verificationLink = `${req.protocol}://${req.get(
+      "host"
+    )}/api/users/verify/${user.verificationToken}`;
+    const msg = {
+      to: email,
+      from: process.env.SENDGRID_SENDER_EMAIL,
+      subject: "Email Verification",
+      html: `<p>Please verify your email by clicking the following link: <a href="${verificationLink}">Verify Email</a></p>`,
+    };
+    await sgMail.send(msg);
+
+    res.status(200).json({ message: "Verification email sent" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
   }
 });
 

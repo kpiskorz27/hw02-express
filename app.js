@@ -1,3 +1,6 @@
+require("dotenv").config();
+require("./config/config-passport");
+
 const express = require("express");
 const logger = require("morgan");
 const cors = require("cors");
@@ -6,9 +9,6 @@ const path = require("path");
 
 const contactsRouter = require("./routes/api/contacts");
 const usersRouter = require("./routes/api/user");
-
-require("dotenv").config();
-require("./config/config-passport");
 
 const app = express();
 
